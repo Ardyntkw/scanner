@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scanner Carpenamel</title>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root { --bg:#004225; --fg:#fbca54; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; font-family:system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+  h1 { font-size:20px; margin:0 0 12px; }
+  input, button { width:100%; padding:12px; font-size:16px; border-radius:8px; border:2px solid var(--fg); margin-bottom:8px; }
+  input { background:#fff; color:#111; }
+  button { background:var(--fg); color:var(--bg); font-weight:700; cursor:pointer; }
+  button.sekunder { background:transparent; color:var(--fg); }
+  #reader { width:100%; max-width:420px; margin:8px auto; }
+  #pesan { min-height:22px; margin:8px 0; font-weight:600; }
+  .kartu { border:2px solid var(--fg); border-radius:10px; padding:12px; margin-top:8px; }
+  .baris { display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-bottom:1px dashed rgba(251,202,84,.4); }
+</style>
+</head>
+<body>
+<h1>Scanner Pengambilan</h1>
+
+<input id="pin" type="password" inputmode="numeric" placeholder="PIN">
+<button id="mulai" onclick="mulai()">Mulai Scan</button>
+<button id="berhenti" class="sekunder" onclick="berhenti()" style="display:none">Berhenti</button>
+<div id="reader"></div>
+
+<input id="manual" placeholder="Atau ketik kode, mis. KSB-ABC123">
+<button class="sekunder" onclick="cariManual()">Cari Kode</button>
+
+<div id="pesan"></div>
+<div id="hasil"></div>
+
+<script>
+const API = 'ISI_URL_DEPLOYMENT';
+let qr = null, sibuk = false, kodeAktif = '';
+const $ = id => document.getElementById(id);
+const pesan = (t) => { $('pesan').textContent = t || ''; };
+
+async function panggil(params) {
+  const r = await fetch(API + '?' + new URLSearchParams(params));
+  return r.json();
+}
+
+function ambilKode(teks) {
+  const m = String(teks).toUpperCase().match(/KSB-[A-Z0-9]{6}/);
+  return m ? m[0] : '';
+}
+
+async function mulai() {
+  if (!$('pin').value) return pesan('Isi PIN dulu.');
+  $('hasil').innerHTML = ''; pesan('');
+  qr = qr || new Html5Qrcode('reader');
+  try {
+    await qr.start({ facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 240, height: 240 } }, onScan, () => {});
+    $('mulai').style.display = 'none';
+    $('berhenti').style.display = '';
+  } catch (e) {
+    pesan('Kamera gagal dibuka: ' + e + '. Pastikan izin kamera diizinkan untuk situs ini.');
+  }
+}
+
+async function berhenti() {
+  try { if (qr && qr.isScanning) await qr.stop(); } catch (e) {}
+  $('mulai').style.display = '';
+  $('berhenti').style.display = 'none';
+}
+
+async function onScan(teks) {
+  if (sibuk) return;
+  const kode = ambilKode(teks);
+  if (!kode) return;
+  sibuk = true;
+  await berhenti();
+  await cariKode(kode);
+  sibuk = false;
+}
+
+function cariManual() {
+  const kode = ambilKode($('manual').value);
+  if (!kode) return pesan('Format kode tidak valid.');
+  if (!$('pin').value) return pesan('Isi PIN dulu.');
+  cariKode(kode);
+}
+
+async function cariKode(kode) {
+  pesan('Mencari ' + kode + '...');
+  $('hasil').innerHTML = '';
+  try {
+    const res = await panggil({ aksi: 'cari', kode, pin: $('pin').value });
+    if (!res.ok) return pesan(res.error);
+    if (!res.data) return pesan('Kode ' + kode + ' tidak ditemukan.');
+    kodeAktif = res.data.kode;
+    tampil(res.data);
+    pesan('');
+  } catch (e) {
+    pesan('Gagal terhubung: ' + e);
+  }
+}
+
+function tampil(d) {
+  const box = $('hasil');
+  box.innerHTML = '';
+  const kartu = document.createElement('div');
+  kartu.className = 'kartu';
+  const tambah = (a, b) => {
+    const row = document.createElement('div'); row.className = 'baris';
+    const x = document.createElement('span'); x.textContent = a;
+    const y = document.createElement('span'); y.textContent = b;
+    row.append(x, y); kartu.append(row);
+  };
+  tambah('Kode', d.kode);
+  tambah('Nama', d.nama);
+  tambah('Barang', d.barang + ' x' + d.items.length);
+  tambah('Total', 'Rp ' + Number(d.total).toLocaleString('id-ID'));
+  d.items.forEach((it, i) => {
+    tambah('Item ' + (i + 1) + (it.lokasi ? ' (' + it.lokasi + ')' : ''),
+           it.status ? it.status + (it.waktu ? ' ' + it.waktu : '') : 'Belum diambil');
+  });
+  box.append(kartu);
+
+  const belum = d.items.some(it => !it.status);
+  const tombol = document.createElement('button');
+  if (belum) {
+    tombol.textContent = 'Konfirmasi Sudah Diambil';
+    tombol.onclick = konfirmasi;
+  } else {
+    tombol.textContent = 'Semua sudah diambil';
+    tombol.disabled = true;
+  }
+  box.append(tombol);
+}
+
+async function konfirmasi() {
+  pesan('Menyimpan...');
+  try {
+    const res = await panggil({ aksi: 'konfirmasi', kode: kodeAktif, pin: $('pin').value });
+    if (!res.ok) return pesan(res.error);
+    pesan(res.jumlah + ' item ditandai sudah diambil.');
+    cariKode(kodeAktif);
+  } catch (e) {
+    pesan('Gagal menyimpan: ' + e);
+  }
+}
+</script>
+</body>
+</html>
