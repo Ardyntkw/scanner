@@ -18,6 +18,8 @@
   #pesan { min-height:22px; margin:8px 0; font-weight:600; }
   .kartu { border:2px solid var(--fg); border-radius:10px; padding:12px; margin-top:8px; }
   .baris { display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-bottom:1px dashed rgba(251,202,84,.4); }
+    button:disabled { opacity: .5; }
+  button.sekunder.aktif { background: var(--fg); color: var(--bg); }
 </style>
 </head>
 <body>
@@ -102,9 +104,12 @@ async function cariKode(kode) {
   }
 }
 
+const CARA = ['Sesuai titik', 'Dititik lain', 'Diantar'];
+let caraDipilih = '';
+
 function tampil(d) {
   const box = $('hasil');
-  box.innerHTML = '';
+  box.innerHTML = ''; caraDipilih = '';
   const kartu = document.createElement('div');
   kartu.className = 'kartu';
   const tambah = (a, b) => {
@@ -119,26 +124,43 @@ function tampil(d) {
   tambah('Total', 'Rp ' + Number(d.total).toLocaleString('id-ID'));
   d.items.forEach((it, i) => {
     tambah('Item ' + (i + 1) + (it.lokasi ? ' (' + it.lokasi + ')' : ''),
-           it.status ? it.status + (it.waktu ? ' ' + it.waktu : '') : 'Belum diambil');
+      it.status ? it.status + (it.cara ? ' - ' + it.cara : '') + (it.waktu ? ' ' + it.waktu : '') : 'Belum diambil');
   });
   box.append(kartu);
 
   const belum = d.items.some(it => !it.status);
-  const tombol = document.createElement('button');
-  if (belum) {
-    tombol.textContent = 'Konfirmasi Sudah Diambil';
-    tombol.onclick = konfirmasi;
-  } else {
-    tombol.textContent = 'Semua sudah diambil';
-    tombol.disabled = true;
+  if (!belum) {
+    const t = document.createElement('button');
+    t.textContent = 'Semua sudah diambil'; t.disabled = true;
+    box.append(t); return;
   }
-  box.append(tombol);
+
+  const label = document.createElement('div');
+  label.textContent = 'Cara pengambilan:';
+  label.style.cssText = 'margin:12px 0 6px;font-weight:700';
+  const grup = document.createElement('div');
+  const konf = document.createElement('button');
+  konf.textContent = 'Konfirmasi Sudah Diambil';
+  konf.disabled = true;
+  konf.onclick = konfirmasi;
+  CARA.forEach(c => {
+    const b = document.createElement('button');
+    b.textContent = c; b.className = 'sekunder';
+    b.onclick = () => {
+      caraDipilih = c;
+      grup.querySelectorAll('button').forEach(x => x.classList.toggle('aktif', x === b));
+      konf.disabled = false;
+    };
+    grup.append(b);
+  });
+  box.append(label, grup, konf);
 }
 
 async function konfirmasi() {
+  if (!caraDipilih) return pesan('Pilih cara pengambilan dulu.');
   pesan('Menyimpan...');
   try {
-    const res = await panggil({ aksi: 'konfirmasi', kode: kodeAktif, pin: $('pin').value });
+    const res = await panggil({ aksi: 'konfirmasi', kode: kodeAktif, pin: $('pin').value, cara: caraDipilih });
     if (!res.ok) return pesan(res.error);
     pesan(res.jumlah + ' item ditandai sudah diambil.');
     cariKode(kodeAktif);
